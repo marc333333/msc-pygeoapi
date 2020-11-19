@@ -32,7 +32,7 @@
 # =================================================================
 
 import click
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import logging
 import os
 
@@ -60,7 +60,7 @@ STATIONS_CACHE = os.path.join(MSC_PYGEOAPI_CACHEDIR, STATIONS_LIST_NAME)
 DAYS_TO_KEEP = 30
 
 # index settings
-INDEX_NAME = 'swob_realtime'
+INDEX_BASENAME = 'swob_realtime'
 
 SETTINGS = {
     'settings': {
@@ -284,10 +284,14 @@ class SWOBRealtimeLoader(BaseLoader):
 
         BaseLoader.__init__(self)
 
+        today = date.today().strftime('%Y-%m-%d')
+
         self.ES = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
-        if not self.ES.indices.exists(INDEX_NAME):
-            self.ES.indices.create(index=INDEX_NAME, body=SETTINGS,
+        self.INDEX_NAME = '{}-{}'.format(INDEX_BASENAME, today)
+
+        if not self.ES.indices.exists(self.INDEX_NAME):
+            self.ES.indices.create(index=self.INDEX_NAME, body=SETTINGS,
                                    request_timeout=MSC_PYGEOAPI_ES_TIMEOUT)
 
     def generate_observations(self, filepath):
@@ -308,7 +312,7 @@ class SWOBRealtimeLoader(BaseLoader):
                      .format(observation_id))
         action = {
             '_id': observation_id,
-            '_index': INDEX_NAME,
+            '_index': self.INDEX_NAME,
             '_op_type': 'update',
             'doc': observation,
             'doc_as_upsert': True
@@ -410,34 +414,25 @@ def add(ctx, file_, directory):
 @cli_options.OPTION_YES(
     prompt='Are you sure you want to delete old documents?'
 )
-def clean_records(ctx, days):
-    """Delete old documents"""
+def clean_indexes(ctx, days):
+    """Delete old indexes """
 
     es = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
     today = datetime.now().replace(hour=0, minute=0)
-    older_than = (today - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M')
-    click.echo('Deleting documents older than {} ({} full days)'
-               .format(older_than.replace('T', ' '), days))
+    older_than = (today - timedelta(days=days))
+    older_than2 = older_than.strftime('%Y-%m-%dT%H:%M')
+    click.echo('Deleting indexes older than {} ({} full days)'
+               .format(older_than2.replace('T', ' '), days))
 
-    query = {
-        'query': {
-            'range': {
-                'properties.DATETIME': {
-                    'lt': older_than,
-                    'format': 'strict_date_hour_minute'
-                }
-            }
-        }
-    }
+    delta = today - older_than
 
-    response = es.delete_by_query(index=INDEX_NAME, body=query,
-                                  request_timeout=90)
-
-    click.echo('Deleted {} documents'.format(response['deleted']))
-    if len(response['failures']) > 0:
-        click.echo('Failed to delete {} documents in time range'
-                   .format(len(response['failures'])))
+    for i in range(delta.days + 1):
+        day = today + timedelta(days=i)
+        index_to_delete = '{}-{}'.format(INDEX_BASENAME, day)
+        click.echo('Deleting index {}'.format(index_to_delete))
+        es.indices.delete(index_to_delete)
+        click.echo('Deleted index {}'.format(index_to_delete))
 
 
 @click.command()
@@ -445,15 +440,17 @@ def clean_records(ctx, days):
 @cli_options.OPTION_YES(
     prompt='Are you sure you want to delete these indexes?'
 )
-def delete_index(ctx):
+def delete_indexes(ctx):
     """Delete SWOB realtime indexes"""
+
+    all_indexes = '{}-*'.format(INDEX_BASENAME)
 
     es = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
-    if es.indices.exists(INDEX_NAME):
-        es.indices.delete(INDEX_NAME)
+    if es.indices.exists(all_indexes):
+        es.indices.delete(all_indexes)
 
 
 swob_realtime.add_command(add)
-swob_realtime.add_command(clean_records)
-swob_realtime.add_command(delete_index)
+swob_realtime.add_command(clean_indexes)
+swob_realtime.add_command(delete_indexes)

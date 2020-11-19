@@ -443,26 +443,28 @@ def cache_stations(ctx):
 @click.pass_context
 @cli_options.OPTION_DAYS(
     default=DAYS_TO_KEEP,
-    help='Delete documents older than n days (default={})'
+    help='Delete indexes older than n days (default={})'
 )
 @cli_options.OPTION_YES(
-    prompt='Are you sure you want to delete old documents?'
+    prompt='Are you sure you want to delete old indexes?'
 )
-def clean_records(ctx, days):
-    """Delete old documents"""
+def clean_indexes(ctx, days):
+    """Delete old indexes """
 
     es = get_es(MSC_PYGEOAPI_ES_URL, MSC_PYGEOAPI_ES_AUTH)
 
     today = datetime.now().replace(hour=0, minute=0)
-    older_than = (today - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M')
+    older_than = (today - timedelta(days=days))
+    older_than2 = older_than.strftime('%Y-%m-%dT%H:%M')
     click.echo('Deleting indexes older than {} ({} full days)'
-               .format(older_than.replace('T', ' '), days))
+               .format(older_than2.replace('T', ' '), days))
 
     delta = today - older_than
 
     for i in range(delta.days + 1):
         day = today + timedelta(days=i)
         index_to_delete = '{}-{}'.format(INDEX_BASENAME, day)
+        click.echo('Deleting index {}'.format(index_to_delete))
         es.indices.delete(index_to_delete)
         click.echo('Deleted index {}'.format(index_to_delete))
 
@@ -484,5 +486,5 @@ def delete_indexes(ctx):
 
 
 hydrometric_realtime.add_command(cache_stations)
-hydrometric_realtime.add_command(clean_records)
+hydrometric_realtime.add_command(clean_indexes)
 hydrometric_realtime.add_command(delete_indexes)
